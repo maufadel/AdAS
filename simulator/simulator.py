@@ -1,6 +1,6 @@
 #===================================================================================================#
 #                                         Simulator                                                 #
-#    Last Modification: 08.08.2018                                         Mauricio Fadel Argerich  #
+#    Last Modification: 09.03.2020                                         Mauricio Fadel Argerich  #
 #===================================================================================================#
 
 import cloudpickle
@@ -13,9 +13,6 @@ import psutil
 import sys
 import time
 
-sys.path.append('scripts/simulator/')
-sys.path.append('scripts/utils/')
-
 from entities import MFADevice, MFACpu
 
 
@@ -23,7 +20,7 @@ class MFASimulator:
 
     def __init__(self):
         self.profile = None
-        self.utility_map = pd.read_csv('scripts/simulator/comb_summary.csv', index_col = 0)
+        self.utility_map = pd.read_csv('./simulator/comb_summary.csv', index_col = 0)
 
     def check_pipelines(self, pipeline1, pipeline2):
         if len(pipeline1) != len(pipeline2):
