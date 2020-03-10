@@ -1,6 +1,6 @@
 #===================================================================================================#
 #                                      AdAS Environment                                             #
-#    Last Modification: 09.03.2020                                         Mauricio Fadel Argerich  #
+#    Last Modification: 10.03.2020                                         Mauricio Fadel Argerich  #
 #===================================================================================================#
 
 import cloudpickle
@@ -19,40 +19,129 @@ sys.path.append('scripts/utils/')
 
 from entities import MFADevice, MFACpu
 from simulator import MFASimulator
+    
 
 
 class AdASEnvironment:
 
-    def __init__(self, simulator, latency_target, inputs, cpu_steps):
-        # cpu_steps is not used.
+    def __init__(self, simulator, latency_target, inputs, state_mask = None):
+        """
+        Keyword arguments:
+        - state_mask: defines array to be returned as state. If None, all are 
+                      returned. Options: 'available_cpu', 'latency', 
+                      'params', 'utility'.
+                      Note: params will add one element per parameter to the 
+                      state array.
+        """
         self.simulator = simulator
         self.latency_target = latency_target
         self.inputs = inputs
-        self.available_cpu = self.get_new_available_cpu(0.3 + abs(np.random.randn())*0.7)
-
+        
         self.set_combinations(simulator.profile.pipeline_data)
+        
+        # State is set in update_state().
+        self.iter = 0
+        self.__state = OrderedDict()
+        self.update_state(None, None)
+        
+        # Set state mask. If None, full state will be returned.
+        if state_mask == None:
+            self.state_mask = list(self.__state.keys())
+        else:
+            self.state_mask = []
+            for s in state_mask:
+                if s == 'params':
+                    self.state_mask.extend(self.params_names)
+                elif s in self.__state.keys():
+                    self.state_mask.append(s)
+                else:
+                    raise ValueError('Unknown element in state mask! Available options: ' + list(self.__state.keys()))
 
         # CPU, latency and one discrete value sorted by ascending utility for each param.
-        low = np.concatenate((np.array([0, 0]), np.zeros(len(self.params_names))))
-        high = np.concatenate(([100, np.Infinity], 
-                               [len(self.params_names_values.get(pn)) for pn in self.params_names]))
-        self.observation_space = spaces.Box(low = low, high = high, dtype = np.float32)
+        self.observation_space = spaces.Box(low = self.get_low_state(), 
+                                            high = self.get_high_state(), 
+                                            dtype = np.float32)
+        # Actions are each combination of params to use.
         self.action_space = spaces.Discrete(len(self.params_values_comb))
-
-        self.reset()
         
         
-    def get_new_available_cpu(self, old_cpu):
-        if abs(np.random.randn()) < 0.1:
-            new_cpu = old_cpu + np.random.randn()/10
-            if new_cpu > 1.0:
-                new_cpu = old_cpu
-            elif new_cpu < 0.3:
-                new_cpu = old_cpu
+    def get_low_state(self):
+        # cpu_availability, latency, params, utility.
+        low_state = []
+        for m in self.state_mask:
+            if m in self.params_names:
+                # All parameters are in range [0,len(values)).
+                low_state.append(0) 
+            elif m == 'available_cpu':
+                low_state.append(0)
+            elif m == 'last_latency':
+                low_state.append(0)
+            elif m == 'utility':
+                low_state.append(0)
+            else:
+                # Not gonna happen because it's already checked in __init__ ;)
+                pass
+        return np.array(low_state)
+    
+    def get_high_state(self):
+        high_state = []
+        for m in self.state_mask:
+            if m in self.params_names:
+                # All parameters are in range [0,len(values)).
+                high_state.append((len(self.params_names_values.get(m))-1)) 
+            elif m == 'available_cpu':
+                high_state.append(1)
+            elif m == 'last_latency':
+                high_state.append(np.Infinity)
+            elif m == 'utility':
+                high_state.append(1)
+            else:
+                # Not gonna happen because it's already checked in __init__ ;)
+                pass
+        return np.array(high_state)
+        
+        
+    def update_state(self, old_state, action):
+        """
+        Takes old state and action and returns new state.
+        State: [available_cpu, last_latency, [value for each param], utility]
+        """
+        
+        if old_state == None and action == None:
+            self.__state['available_cpu'] =  1
+            self.__state['latency'] = 0.9
+            for pn in self.params_names:
+                self.__state[pn] = 0
+            self.__state['utility'] = 1
+        
         else:
-            new_cpu = old_cpu
-        
-        return new_cpu
+            # Simulate new cpu availability and set it..
+            old_cpu = old_state.get('available_cpu')
+            if abs(np.random.randn()) < 0.1:
+                new_cpu = old_cpu + np.random.randn()/10
+                if new_cpu > 1.0:
+                    new_cpu = old_cpu
+                elif new_cpu < 0.3:
+                    new_cpu = old_cpu
+            else:
+                new_cpu = old_cpu
+            self.__state['available_cpu'] = new_cpu
+
+            # Get current params.
+            params_to_use = self.get_params_values(self.params_values_comb[action])
+
+            # Calculate current latency using simulator and set it.
+            exec_res = self.simulator.sim('new_rp', self.inputs[self.iter],
+                                          params_to_use, new_cpu)
+            # Sum latencies for all functions in pipelines and set it.
+            self.__state['latency'] = np.sum(exec_res.get('latency')) 
+
+            # Set params (here only because of order).
+            for pn, v in params_to_use.items():
+                self.__state[pn] = self.get_value_ix(pn, v)
+
+            # Get current utility from simulator.
+            self.__state['utility'] = self.simulator.get_utility(params_to_use)
     
     
     def set_combinations(self, pipeline):
@@ -101,7 +190,6 @@ class AdASEnvironment:
             
             ix += 1
     
-
     def compute_reward(self, lat, util):
         if lat <= self.latency_target:
             return (util - self.min_utility)/(self.max_utility - self.min_utility)
@@ -109,46 +197,45 @@ class AdASEnvironment:
             return (self.latency_target - lat) / self.latency_target
 
         
-    def step(self, a):
-        # action is 0 to decrease, 1 to stay, 2 to increase
-        # map the number to the actual combination
-        # simulate the inputs with the combination
-        # get latency and utility
-        # return (state, reward, finished?, {info})
-        self.available_cpu = self.get_new_available_cpu(self.available_cpu)
-        params_to_use = self.get_params_values(self.params_values_comb[a])
-        exec_res = self.simulator.sim('new_rp', self.inputs[self.iter],
-                                      params_to_use, self.available_cpu)
-        self.curr_lat = np.sum(exec_res.get('latency')) # Sum of latencies of each function.
-        self.curr_util = self.simulator.get_utility(params_to_use)
-        
-        # CPU, latency and one discrete value for each param.
-        self.curr_state = np.concatenate(([self.available_cpu, self.curr_lat],
-                                          [self.get_value_ix(pn, params_to_use.get(pn)) for pn in self.params_names]))
-        
+    def is_finished(self):
         finished = False
         self.iter += 1
         if self.iter >= len(self.inputs):
             finished = True
-            
-        # Create info dictionary.
-        info = OrderedDict()
-        info['available_cpu'] = self.available_cpu
-        info['latency'] = self.curr_lat
+        return finished
+    
+    def get_info(self, a):
+        info = {}
+        info['available_cpu'] = self.__state.get('available_cpu')
+        info['latency'] = self.__state.get('latency')
         for pn, v in self.get_params_values(self.params_values_comb[a]).items():
             info[pn] = str(self.get_value_ix(pn, v)) + ': ' + str(v)
-        info['utility'] = self.curr_util
+        info['utility'] = self.__state.get('utility')
         info['step'] = self.iter
         
-        return self.curr_state, self.compute_reward(self.curr_lat, self.curr_util), finished, info
+        return info
+    
+    def get_masked_state(self):
+        return np.array([self.__state.get(m) for m in self.state_mask])
+        
+    def step(self, a):
+        # Action is combination of params to use.
+        
+        # Calculate, simulate and set new state.
+        self.update_state(self.__state, a)
+        # Convert state into array and if mask is defined, mask it.
+        masked_state = self.get_masked_state()
+        
+        reward = self.compute_reward(self.__state.get('latency'), self.__state.get('utility'))
+        finished = self.is_finished()
+        info = self.get_info(a)
+        
+        return masked_state, reward, finished, info
 
     def reset(self):
         self.iter = 0
-        self.available_cpu = 1.0
-        self.curr_lat = 0.9
-        self.curr_state = np.concatenate(([self.available_cpu, self.curr_lat],
-                                          [0 for _ in self.params_names]))
-        return self.curr_state
+        self.update_state(None, None)
+        return self.get_masked_state()
     
 class MFAEnvironmentSimpleStates:
 
@@ -160,8 +247,8 @@ class MFAEnvironmentSimpleStates:
         self.available_cpu = self.get_new_available_cpu(0.3 + abs(np.random.randn())*0.7)
 
         self.set_combinations(simulator.profile.pipeline_data)
-        self.state_map = self.build_state_map()
-        self.observation_space = len(self.state_map.keys())   # latency * comb_params
+        self.__state_map = self.build_state_map()
+        self.observation_space = len(self.__state_map.keys())   # latency * comb_params
         self.action_space = len(self.params_values_comb)
         self.reset()
         
@@ -229,7 +316,7 @@ class MFAEnvironmentSimpleStates:
 
     def encode_state(self, lat, params_comb):
         lat_state = self.discretize_lat(lat)
-        return self.state_map.get((lat_state, params_comb))
+        return self.__state_map.get((lat_state, params_comb))
 
     def compute_reward(self, lat, util):
         if lat <= self.latency_target:
