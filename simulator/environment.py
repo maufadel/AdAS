@@ -264,20 +264,20 @@ class AdASEnvironment:
         """
         Checks the termination condition, returns True if run is finished.
         """
-        if self.sample_inputs and self.n_steps != None and self.iter >= self.n_steps:
-            # Run finishes when n_steps is reached.
-            return True
-        
-        elif self.iter >= len(self.inputs):
-            # Run finishes when all the inputs have been used.
-            return True
-        
+        if self.sample_inputs:
+            if self.n_steps != None and self.iter >= self.n_steps:
+                # Run finishes when n_steps is reached.
+                return True
+            else:
+                # n_steps has not been reached yet or n_steps is None.
+                return False
         else:
-            # Reached when:
-            # - sample_inputs == True and self.iter < self.n_steps, n_steps has not been reached yet.
-            # - sample_inputs == False and self.iter < len(self.inputs), all inputs have not been used.
-            # - sample_inputs == True and self.n_steps is None, run never finishes.
-            return False
+            if self.iter >= len(self.inputs):
+                # Run finishes when all the inputs have been used.
+                return True
+            else:
+                # All inputs have not been used yet.
+                return False
     
     def get_info(self, a):
         """
