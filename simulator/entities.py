@@ -1,50 +1,46 @@
 #===================================================================================================#
 #                                       Simulator Entities                                          #
-#    Last Modification: 06.08.2018                                         Mauricio Fadel Argerich  #
+#    Last Modification: 12.03.2020                                         Mauricio Fadel Argerich  #
 #===================================================================================================#
 
 from abc import ABC, abstractmethod
 import cloudpickle
 import numpy as np
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 import psutil
 from abc import ABC, abstractmethod
+import sys
 
 
 # =================================== CLASSES ===================================#
-class MFAUtil:
-    def params_input_to_string(params_data, input_data):
-        res = ''
-        # Param values are sorted by param_name.
-        for p, v in sorted(params_data.items()):
-            res += str(p) + ':' + str(v) + '_'
+def params_input_to_string(params_data, io):
+    res = ''
+    # Param values are sorted by param_name.
+    for p, v in sorted(params_data.items()):
+        res += str(p) + ':' + str(v) + '_'
 
-        res += input_data.io_id
+    res += str(io.io_id)
 
-        return res
-
-
-class MFAIOData:
-    io_id = ''
-    io_size = 0
-    io_format = ''
-
-    def __init__(self, io_id, io_size, io_format):
-        self.io_id = io_id
-        self.io_size = io_size
-        self.io_format = io_format
+    return res
 
 
-class MFAIO:
-    io_value = None
-    data = None
-
-    def __init__(self, io_id, io_size, io_format, io_value):
-        self.io_value = io_value
-        self.data = MFAIOData(io_id, io_size, io_format)
-
-
-class MFACpu:
+class AdASIO:
+    def __init__(self, io_value = None, io_id = None, io_size = None, io_format = None):
+        '''
+        Initiate an Input/Output of a function. It can be created using the actual IO or
+        using the IO id, size and format. You can also create an IO defining all its properties.
+        '''
+        if io_value == None and (io_id == None or io_size == None or io_format == None):
+            raise ValueError('IO can be created using the actual IO (io_value) OR by using all of its data (io_id, io_size and io_format).')
+            
+        # If any property was defined use it, otherwise we fill it automatically.
+        self.io_value  = io_value
+        self.io_id     = io_id     if io_id     else str(io_value)
+        self.io_size   = io_size   if io_size   else sys.getsizeof(io_value)
+        self.io_format = io_format if io_format else type(io_value)
+        
+        
+class AdASCpu:
     cores = 1
     speed = 1.0
 
@@ -53,7 +49,7 @@ class MFACpu:
         self.speed = speed
 
 
-class MFADevice:
+class AdASDevice:
     device_id = ''
     cpu = None
     memory = 0
@@ -62,9 +58,9 @@ class MFADevice:
         self.device_id = device_id
         self.cpu = cpu
         self.memory = memory
-
-
-class MFAExecutionData:
+        
+        
+class AdASExecutionData:
     input_data = None
     params_data = None
     output_data = None
@@ -75,21 +71,20 @@ class MFAExecutionData:
         self.params_data = params_data
         self.output_data = output_data
         self.stats = stats
+        
+    def get_name(self):
+        return params_input_to_string(self.params_data, self.input_data)
+        
+    
+class AdASFunction:
 
-
-class MFAFunctionData:
-    name = ''
-    params_data = []  # list of dicts = {value: utility}
-    deployments = {}  # dict of {device: exec_history}
-
-    def __init__(self, name, params, deployments = None):
-        self.name = name
-        self.params_data = self.get_dummy_params(params)
-        if not deployments:
-            self.deployments = {}
-        else:
-            self.deployments = deployments
-
+    def __init__(self, function, params, deployments = None):
+        self.function = function
+        self.data =  {}
+        self.params = OrderedDict()
+        for param_name in params.keys():
+            self.params[param_name] = (OrderedDict(params.get(param_name)))
+            
     def get_dummy_params(self, params):
         dummy_params = {}
         for p, values in params.items():
@@ -98,55 +93,32 @@ class MFAFunctionData:
                 dummy_values[str(v)] = u
             dummy_params[p] = dummy_values
         return dummy_params
-
+    
     def add_exec_sample(self, device_id, input_data, output_data, params_data, stats):
-        exec_history = self.deployments.get(device_id)
-        if exec_history == None:
-            exec_history = {}
+        if self.data.get(device_id) == None:
+            self.data[device_id] = defaultdict(list)
 
-        if exec_history.get(MFAUtil.params_input_to_string(params_data, input_data)) == None:
-            exec_history[MFAUtil.params_input_to_string(params_data, input_data)] = []
-
-        exec_sample = MFAExecutionData(input_data=input_data,
-                                       output_data=output_data,
-                                       params_data=params_data,
-                                       stats=stats)
-        exec_history.get(MFAUtil.params_input_to_string(params_data, input_data)).append(exec_sample)
-
-        self.deployments[device_id] = exec_history
-
+        exec_sample = AdASExecutionData(input_data=input_data, output_data=output_data,
+                                        params_data=params_data, stats=stats)
+        
+        self.data.get(device_id)[exec_sample.get_name()].append(exec_sample)
+        
     def get_utility(self, param_values):
         u = 0
         for p, v in param_values.items():
-            u += self.params_data.get(p).get(v)
+            u += self.params.get(p).get(v)
         return u
 
     def sim(self, device_id, input_data, param_values, exact_match = True):
-        exec_history = self.deployments.get(device_id)
-        if exec_history == None or exec_history.get(MFAUtil.params_input_to_string(param_values, input_data)) == None:
-            raise ValueError('There is no data for this input, device and these params!',
-                             device_id,
-                             MFAUtil.params_input_to_string(param_values, input_data))
+        exec_sample = AdASExecutionData(input_data=input_data, params_data=param_values)
+        
+        if self.data.get(device_id) == None or self.data.get(device_id).get(exec_sample.get_name()) == None:
+            raise ValueError('There is no data for this input, device and params!', device_id, exec_sample.get_name())
 
-        exec_sample = np.random.choice(exec_history.get(MFAUtil.params_input_to_string(param_values, input_data)))
-
-        return (exec_sample.output_data, exec_sample.stats, self.get_utility(param_values))
+        return np.random.choice(self.data.get(device_id).get(exec_sample.get_name()))
 
 
-class MFAFunction:
-    function = None
-    params = OrderedDict()
-    data = None
-
-    def __init__(self, function, params, deployments = None):
-        self.function = function
-        self.data = MFAFunctionData(function.__name__, params, deployments)
-        self.params = OrderedDict()
-        for param_name in params.keys():
-            self.params[param_name] = (OrderedDict(params.get(param_name)))
-
-
-class MFAProfileData:
+class AdASProfile:
     device = None
     pipeline_data = None
     inputs_data = None
@@ -157,7 +129,7 @@ class MFAProfileData:
         self.inputs_data = inputs
 
 
-class MFAMetric(ABC):
+class AdASMetric(ABC):
 
     def __init__(self):
         self.value = None
@@ -183,7 +155,7 @@ class MFAMetric(ABC):
         raise NotImplementedError
 
 
-class MFAMetricLatency(MFAMetric):
+class AdASMetricLatency(AdASMetric):
 
     def __init__(self):
         self.name = 'latency'
