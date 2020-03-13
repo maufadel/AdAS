@@ -1,6 +1,6 @@
 #===================================================================================================#
 #                                    Pipeline-Device Profiler                                       #
-#    Last Modification: 12.03.2020                                         Mauricio Fadel Argerich  #
+#    Last Modification: 13.03.2020                                         Mauricio Fadel Argerich  #
 #===================================================================================================#
 
 import cloudpickle
@@ -56,9 +56,9 @@ def exec_combination(device, pipeline, pi_dict, f_input, combination):
         f_output = AdASIO(io_id='io_' + entities.params_input_to_string(params_dict, f_input),
                           io_value=f_output_value)
 
-        f.add_exec_sample(device.device_id, f_input, f_output, params_dict,
-                            {'latency': (row_dict[f.function.__name__ + '_end'] - row_dict[f.function.__name__ + '_start']),
-                             'utility': f.get_utility(params_dict)})
+        f.add_exec_sample(f_input, f_output, params_dict,
+                          {'latency': (row_dict[f.function.__name__ + '_end'] - row_dict[f.function.__name__ + '_start']),
+                           'utility': f.get_utility(params_dict)})
         f_input = f_output
 
     row_dict['output'] = f_input.io_value
@@ -117,12 +117,12 @@ def profile(device_name, pipeline, pipeline_inputs, n, results_filename = 'resul
 
         for comb in tqdm(all_combinations.copy()):
             try:
-            for _ in range(n):
-                res_rows.append(exec_combination(device, pipeline, pi_dict, pi, comb))
+                for _ in range(n):
+                    res_rows.append(exec_combination(device, pipeline, pi_dict, pi, comb))
             except:
                 # Remove combination so we don't try to run it again.
                 all_combinations.remove(comb)
-               print()
+                print()
                 print("Combination failed!", end=' ')
                 for pv in comb:
                     print(pv, end=' ')

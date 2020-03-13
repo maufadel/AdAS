@@ -1,6 +1,6 @@
 #===================================================================================================#
 #                                         Simulator                                                 #
-#    Last Modification: 12.03.2020                                         Mauricio Fadel Argerich  #
+#    Last Modification: 13.03.2020                                         Mauricio Fadel Argerich  #
 #===================================================================================================#
 
 import cloudpickle
@@ -39,13 +39,13 @@ class AdASSimulator:
         for f in self.profile.pipeline_data:
             f_params = {}
             for p, v in param_values.items():
-                if f.params_data.get(p):
+                if f.params.get(p):
                     f_params[p] = v
 
             u += f.get_utility(f_params)
         return u
 
-    def sim(self, device_id, input_data, param_values, available_cpu = 1.0):
+    def sim(self, input_data, param_values, available_cpu = 1.0):
         res_stats = defaultdict(list)
         # f_output is the input_data of the next function in pipeline.
         f_output = input_data
@@ -59,7 +59,7 @@ class AdASSimulator:
                     f_params[p] = v
 
             # Simulate execution of function.
-            exec_data = f.sim(device_id, f_output, f_params)
+            exec_data = f.sim(f_output, f_params)
             f_output = exec_data.output_data
             res_stats['utility'] = exec_data.stats.get('utility')
             for k, v in exec_data.stats.items():

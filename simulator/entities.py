@@ -1,6 +1,6 @@
 #===================================================================================================#
 #                                       Simulator Entities                                          #
-#    Last Modification: 12.03.2020                                         Mauricio Fadel Argerich  #
+#    Last Modification: 13.03.2020                                         Mauricio Fadel Argerich  #
 #===================================================================================================#
 
 from abc import ABC, abstractmethod
@@ -80,7 +80,7 @@ class AdASFunction:
 
     def __init__(self, function, params, deployments = None):
         self.function = function
-        self.data =  {}
+        self.data =  defaultdict(list)
         self.params = OrderedDict()
         for param_name in params.keys():
             self.params[param_name] = (OrderedDict(params.get(param_name)))
@@ -94,14 +94,11 @@ class AdASFunction:
             dummy_params[p] = dummy_values
         return dummy_params
     
-    def add_exec_sample(self, device_id, input_data, output_data, params_data, stats):
-        if self.data.get(device_id) == None:
-            self.data[device_id] = defaultdict(list)
-
+    def add_exec_sample(self, input_data, output_data, params_data, stats):
         exec_sample = AdASExecutionData(input_data=input_data, output_data=output_data,
                                         params_data=params_data, stats=stats)
         
-        self.data.get(device_id)[exec_sample.get_name()].append(exec_sample)
+        self.data[exec_sample.get_name()].append(exec_sample)
         
     def get_utility(self, param_values):
         u = 0
@@ -109,13 +106,13 @@ class AdASFunction:
             u += self.params.get(p).get(v)
         return u
 
-    def sim(self, device_id, input_data, param_values, exact_match = True):
+    def sim(self, input_data, param_values, exact_match = True):
         exec_sample = AdASExecutionData(input_data=input_data, params_data=param_values)
         
-        if self.data.get(device_id) == None or self.data.get(device_id).get(exec_sample.get_name()) == None:
-            raise ValueError('There is no data for this input, device and params!', device_id, exec_sample.get_name())
+        if self.data.get(exec_sample.get_name()) == None:
+            raise ValueError('There is no data for this input and params!', exec_sample.get_name())
 
-        return np.random.choice(self.data.get(device_id).get(exec_sample.get_name()))
+        return np.random.choice(self.data.get(exec_sample.get_name()))
 
 
 class AdASProfile:

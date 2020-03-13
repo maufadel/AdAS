@@ -1,6 +1,6 @@
 #===================================================================================================#
 #                                      AdAS Environment                                             #
-#    Last Modification: 11.03.2020                                         Mauricio Fadel Argerich  #
+#    Last Modification: 13.03.2020                                         Mauricio Fadel Argerich  #
 #===================================================================================================#
 
 import cloudpickle
@@ -17,8 +17,8 @@ import time
 sys.path.append('scripts/simulator/')
 sys.path.append('scripts/utils/')
 
-from entities import MFADevice, MFACpu
-from simulator import MFASimulator
+from entities import AdASDevice, AdASCpu
+from simulator import AdASSimulator
     
 
 class AdASEnvironment:
@@ -29,9 +29,9 @@ class AdASEnvironment:
         Creates an AdASEnvironment with a simulator, a latency target and a set 
         of inputs.
         Keyword arguments:
-        - simulator: an MFASimulator class, with a profile loaded.
+        - simulator: an AdASSimulator class, with a profile loaded.
         - latency_target: maximum end-to-end latency allowed for application.
-        - inputs: an array of inputs that will be used one per step.
+        - inputs: an array of AdASIO that will be used one per step.
         - sample_inputs: True if inputs should be sampled, False if should be used 
                          as list.
         - n_steps: number of steps before environment finishes, if None environment
@@ -168,7 +168,7 @@ class AdASEnvironment:
             self.__state['input'] = self.get_input()
 
             # Calculate and set current latency using simulator.
-            exec_res = self.simulator.sim('new_rp', self.__state.get('input'),
+            exec_res = self.simulator.sim(self.__state.get('input'),
                                           params_to_use, self.__state['available_cpu'])
             # Sum latencies for all functions in pipelines and set it.
             self.__state['latency'] = np.sum(exec_res.get('latency')) 
@@ -193,20 +193,19 @@ class AdASEnvironment:
         params_values = []
         params_names_values = {}
         for f in pipeline:
-            for param_name in sorted(f.params_data.keys()):
+            for param_name in sorted(f.params.keys()):
                 params_names.append(param_name)
-                params_values.append(list(f.params_data.get(param_name).keys()))
-                params_names_values[param_name] = f.params_data.get(param_name)
+                params_values.append(list(f.params.get(param_name).keys()))
+                params_names_values[param_name] = f.params.get(param_name)
 
         # Get combinations utilities and filter out the not valid ones.
         comb_dict = {}
         for c in list(itertools.product(*params_values)):
-            try:
-                exec_res = self.simulator.sim('new_rp', self.inputs[0], 
-                                              self.get_params_values(c, params_names), 1.0)
-                comb_dict[c] = self.simulator.get_utility(self.get_params_values(c, params_names))
-            except:
-                pass
+            #try:
+            exec_res = self.simulator.sim(self.inputs[0], self.get_params_values(c, params_names), 1.0)
+            comb_dict[c] = self.simulator.get_utility(self.get_params_values(c, params_names))
+            #except:
+            #    pass
 
         sorted_comb = sorted(comb_dict, key=comb_dict.__getitem__)
         self.max_utility = comb_dict.get(sorted_comb[len(sorted_comb) - 1])
